@@ -1,0 +1,279 @@
+# Bag-replay variant of map_localization.yaml, for validating against the PGO
+# trajectory (design doc M2 / test plan section 6).
+#
+# The bag 2026-09-07-07-54-34_ros2 IS the mapping run, so alidarState.txt is
+# ground truth for it: same clock, same sensor, PGO-optimized. The robot starts
+# at the mapping origin, hence init_pose = 0. init_yaw_known is false so the
+# 360 deg search settles the base-vs-IMU yaw convention (g_odom_robo is a 180
+# deg flip here) rather than the operator having to get it right by hand.
+/**:
+  ros__parameters:
+    # ============ frontend: identical to livox_360.yaml ============
+    # MapLoc does not change the frontend. Keep this block in sync with the
+    # mapping config, in particular lio.extrinsic.lidar_imu: the map keyframes
+    # already have the mapping-time extrinsic baked in, and a mismatch shows up
+    # as a constant offset the backend cannot remove. The node warns at startup
+    # if it disagrees with the map's meta.yaml.
+    lio.map.save_map: false
+    lio.map.if_filter: true
+    lio.map.save_map_dir: "map"
+    lio.map.map_name: "map.pcd"
+    lio.map.ds_size: 0.25
+    lio.map.save_interval: 500
+
+    lio.ros.lidar_topic: "/livox/lidar"
+    lio.ros.imu_topic: "/livox/imu"
+
+    lio.sensor.lidar_type: 1
+    lio.sensor.blind: 2.0
+    lio.sensor.maxrange: 60.0
+    lio.sensor.filter_rate: 3
+    lio.sensor.enable_downsample: true
+    lio.sensor.voxel_fliter_size: 0.5
+    lio.sensor.gravity_norm: 9.7946
+    lio.sensor.imu_type: 1
+    lio.sensor.imu_na: 0.1
+    lio.sensor.imu_ng: 0.1
+    lio.sensor.imu_nba: 0.0001
+    lio.sensor.imu_nbg: 0.0001
+    # [s] 滤波器肯盲推的最长 IMU 步长。传播对 dt 是无界的
+    # (p += v*dt + 0.5*a*dt^2)，IMU 又是 best_effort 订阅、时间戳还会跳，
+    # 所以一段缺样本能把小的加速度误差放大成米级位置和 m/s 级速度。
+    # 超过就跳过这一拍：位姿停在原地变"旧"，由下一次扫描匹配拉回来，
+    # 有界且可见。必须明显大于 IMU 周期——MapLoc 总结里的
+    # `imu input period` 就是用来核对这个值的。
+    lio.sensor.imu_max_dt: 0.05
+
+    lio.extrinsic.lidar_imu: [-0.011, -0.02329, 0.04412,
+                              1.0, 0.0, 0.0,
+                              0.0, 1.0, 0.0,
+                              0.0, 0.0, 1.0]
+    lio.extrinsic.base_lidar: [0.0, 0.0, 0.0, 0.0, 20.89, 0.0]
+    # ^ T_base_L: the LIDAR pose in the ROBOT BASE frame.
+    #   [x y z roll pitch yaw], metres and degrees, rpy applied ZYX.
+    #   Base frame is the usual robot convention: x forward, y left, z up.
+    #
+    #   This is the direction a robot vendor documents ("the lidar sits here on
+    #   the robot, at this attitude"), so nothing has to be inverted by hand.
+    #
+    #   xyz: measure it. Nothing can infer the lever arm for you, and with it
+    #   left at 0 /loc/robo/odom is the robot's orientation at the SENSOR's
+    #   position, which is not what a planner wants.
+    #
+    #   roll/pitch: set base_lidar_auto_rp below and they are calibrated from
+    #   gravity at startup instead. yaw always comes from here -- gravity is
+    #   rotationally symmetric about it and says nothing.
+    lio.extrinsic.base_lidar_auto_rp: true
+    #   Requires the robot to be standing level and still at startup, which is
+    #   the same assumption the ESKF's own gravity alignment already makes.
+
+    lio.hash_map.hash_capacity: 2000000
+    lio.hash_map.vox_resolution: 0.5
+
+    lio.kf.kf_type: 0
+    lio.kf.kf_max_iterations: 4
+    lio.kf.kf_align_gravity: true
+    lio.kf.kf_quit_eps: 0.001
+
+    lio.output.robot: true
+    lio.output.plan_env_world: false
+    lio.output.plan_env_body: false
+    lio.output.ml_map: false
+    lio.output.planner: false
+    lio.output.map: true       # /lio/cloud_world, the live scan; needed to eyeball alignment in RViz
+    lio.output.dense: false
+    lio.output.pub_step: 1
+
+    lio.eva.timer: true
+
+    # ==================== map localization (MapLoc) ====================
+    # Built by:
+    #   loc_map_builder --session <voxel-slam session> --out <map_dir> \
+    #                   --edges <edge.txt>
+    # Note that sync-real.sh excludes *.pcd, so map_dir must be rsync'd
+    # separately to the board.
+    lio.maploc.map_dir: "/home/zhipengli/localization/loc_map"
+    lio.maploc.preload_all: false
+    lio.maploc.lru_capacity: 300
+
+    # ---- submap ----
+    lio.maploc.submap_radius: 15.0
+    lio.maploc.submap_max_k: 20
+    lio.maploc.submap_refresh_dist: 3.0
+    lio.maploc.submap_prefetch_max_files: 20   # bounded: prefetch is synchronous inside a rebuild
+
+    # ---- observation ----
+    # One mid360 sweep is too sparse for a stable GICP covariance; five sweeps
+    # (0.5 s) match the density of the map keyframes.
+    lio.maploc.accum_frames: 5
+    lio.maploc.source_voxel: 0.25
+
+    # ---- tracking registration ----
+    # VGICP | GICP | PCL_GICP. PCL_GICP is a reference fallback only: it cannot
+    # report an information matrix, so observations get a conservative weight.
+    lio.maploc.registration_type: "VGICP"
+    lio.maploc.target_voxel: 0.5
+    lio.maploc.max_corr_dist: 1.0
+    lio.maploc.max_iter: 20
+    lio.maploc.num_threads: 2      # size of the backend's tbb::task_arena
+    lio.maploc.cov_neighbors: 10
+    lio.maploc.cov_floor_t: 0.03   # [m]
+    lio.maploc.cov_floor_r: 0.3    # [deg]
+    lio.maploc.degenerate_eig_ratio: 1.0e-3
+
+    # ---- coarse registration (initialization and LOST recovery) ----
+    # Measured on this map: tracking parameters converge reliably only from
+    # about 0.3 m / 5 deg. Anything larger has to come through this pass first,
+    # which recovers 1.0 m / 15 deg to ~3 mm. Do not delete it to "save time" --
+    # it is 1 ms.
+    lio.maploc.init_target_voxel: 2.0
+    lio.maploc.init_source_voxel: 0.5
+    lio.maploc.init_max_corr_dist: 3.0
+    lio.maploc.init_max_iter: 30       # 10 left the coarse pass unconverged in 10/25 probes
+
+    # ---- when to match ----
+    lio.maploc.match_min_dist: 0.5      # [m] travelled
+    lio.maploc.match_max_interval: 2.0  # [s]
+
+    # ---- gating ----
+    # gate_body_* are evaluated in the BODY frame: they bound how far a single
+    # accepted match may yank the robot, which is what a planner notices.
+    lio.maploc.track_inlier_min: 0.5
+    lio.maploc.track_rmse_max: 0.3      # [m]
+    lio.maploc.gate_body_t: 1.0         # [m]
+    lio.maploc.gate_body_r: 5.0         # [deg]
+    lio.maploc.chi2_gate: 16.8          # 6 dof, 99%
+    # chi2 拒绝后把观测挂起，下一帧若说同一件事就接受（与速率门同一套容差）。
+    # 关掉它就回到"只能靠过程噪声把 P 撑大才放行"的旧行为。
+    lio.maploc.chi2_confirm_enable: true
+    lio.maploc.max_degenerate_t_dims: 1
+    # 速率门的容差对"走过的距离"是仿射的：rate_* 是随距离累积的漂移，
+    # floor_* 是每次观测自带的噪声。见 map_localization.yaml 的同一段。
+    lio.maploc.rate_gate_t: 0.6           # [m per travelled m]
+    lio.maploc.rate_gate_r: 0.05          # [rad per travelled m]
+    lio.maploc.rate_gate_floor_t: 0.13    # [m]   3 sigma of sqrt(2)*cov_floor_t
+    lio.maploc.rate_gate_floor_r: 1.3     # [deg] 3 sigma of sqrt(2)*cov_floor_r
+    # An alignment that hit its iteration cap still usually holds a good pose,
+    # so it is down-weighted by this factor rather than discarded.
+    lio.maploc.unconverged_cov_scale: 4.0
+
+    # ---- frontend watchdog (FAILED state) ----
+    # 见 map_localization.yaml 的同一段。FAILED 表示前端失效，输出全停。
+    lio.maploc.watch_enable: true
+    lio.maploc.watch_max_speed: 5.0          # [m/s]
+    lio.maploc.watch_speed_frames: 3
+    lio.maploc.watch_max_gap: 1.0            # [s]
+    lio.maploc.watch_odom_radius_margin: 50.0  # [m]
+    lio.maploc.watch_recover_frames: 20
+
+    # ---- estimator ----
+    # Process noise on T_M_O. These describe how far the drift wanders between
+    # two matches (~0.5 m), NOT its long-run average -- on a walking robot the
+    # two differ by 10x. Measured on the mapping bag against the PGO trajectory:
+    # over a 0.5 m window the drift moves 0.18 m/m (median), over 10 m only
+    # 0.017 m/m. The old 0.02 came from the long-run figure and made the filter
+    # so over-confident that the chi-square gate rejected good matches (inlier
+    # 0.86-0.98) six in a row and dropped it into LOST.
+    lio.maploc.sigma_t_per_m: 0.05      # [m] per travelled m
+    lio.maploc.sigma_r_per_m: 0.002     # [rad] per travelled m
+    # Extra rotation noise per rad of FRONTEND tilt change since the last
+    # match (yaw-invariant). Flat ground contributes ~0.1 deg, a staircase
+    # ~0.6 deg, which is where the 2026-09-17 stair refusals came from.
+    lio.maploc.sigma_r_per_tilt: 0.10   # [rad sigma per rad of tilt]
+    lio.maploc.sigma_t_per_s: 0.02      # [m] per second (a stationary robot still drifts)
+    lio.maploc.sigma_r_per_s: 0.0005    # [rad] per second
+    lio.maploc.estimate_roll_pitch: true
+    # 倾斜先验：约束"倾斜变化多快"，不约束"倾斜有多大"。先验把 T_M_O 的
+    # roll/pitch 拉向一个锚点，锚点再以 rp_anchor_rate 跟随估计值。
+    # 实测两次板上跑（20260918/20260920）用单个刚体 T_M_O 拟合全程，倾斜自由时
+    # 残差 0.92/0.35 m、强制归零时 4.28/1.97 m，需要的倾斜是 6.00/4.09 deg；
+    # 而地图系本身重力对齐到 0.17 deg。也就是说前端重力对齐会在十几分钟内漂出
+    # 几度，T_M_O 必须容得下。旧的"拉向 0"在每次接受更新后都执行一次（0920 跑
+    # 了 3300 次），是棘轮不是弱先验：误差漏进平移（T_M_O.z 到了 -7.5 m），
+    # 配准每次都报 1-2 deg 旋转修正，chi2 连拒六次就是一次 LOST。
+    lio.maploc.rp_pseudo_sigma: 2.0     # [deg], 倾斜相对锚点的 1 sigma
+    # 锚点跟随速率。要跟的漂移很慢（板上约 4 deg / 9 min = 0.007 deg/s），
+    # 0.1 deg/s 留一个量级余量，同时在坏匹配存活的几秒内倾斜基本是钉死的。
+    # 没有设锚点上限：试过，实测是摆设（P 正常时 1 deg 的上限只能把 4 deg 的
+    # 观测倾斜压到 3.82 deg）。真正的约束是配准质量门——锚点只会走到配准在固定
+    # 地图上指向的地方，大到有影响的倾斜早就把 inlier/rmse 打穿了。
+    lio.maploc.rp_anchor_rate: 0.1      # [deg/s]
+
+    # ---- output rate limiting ----
+    # Only the correction is limited; the frontend's own motion passes through
+    # untouched, so there is no added lag.
+    lio.maploc.v_max: 0.2               # [m/s]
+    lio.maploc.w_max: 5.0               # [deg/s]
+    lio.maploc.tau: 1.0                 # [s]
+    lio.maploc.snap_t: 1.0              # [m]  beyond this, jump instead of ramp
+    lio.maploc.snap_r: 10.0             # [deg]
+
+    # ---- initialization ----
+    # init_pose is the BASE pose in the map frame: x y z roll pitch yaw,
+    # metres and degrees. z is overridden from the map when init_z_from_map.
+    # Set init_pose_source to "topic" to wait for /initialpose instead.
+    lio.maploc.init_pose: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+    lio.maploc.init_pose_source: "yaml"
+    lio.maploc.init_yaw_known: false
+    lio.maploc.init_yaw_range: 45.0     # [deg]
+    lio.maploc.init_yaw_step: 15.0      # [deg]
+    lio.maploc.init_xy_step: 1.0        # [m], 0 disables the xy offsets
+    lio.maploc.init_z_from_map: true
+    lio.maploc.init_submap_radius: 25.0
+    lio.maploc.init_submap_max_k: 40
+    lio.maploc.init_inlier_min: 0.6
+    lio.maploc.init_rmse_max: 0.2       # [m]
+    lio.maploc.init_max_attempts: 25
+    lio.maploc.init_eager_attempts: 3        # first N attempts run unpaced
+    lio.maploc.init_attempt_min_dist: 0.5    # [m] between later attempts
+    lio.maploc.init_attempt_min_interval: 1.0  # [s]
+    lio.maploc.init_refine_top_k: 3
+    lio.maploc.init_consistency_t: 0.3  # [m]  two scans must agree this closely
+    lio.maploc.init_consistency_r: 3.0  # [deg]
+
+    # ---- loss and recovery ----
+    lio.maploc.lost_reject_count: 6
+    lio.maploc.lost_timeout: 10.0       # [s]
+    lio.maploc.lost_yaw_range: 30.0     # [deg]
+    lio.maploc.lost_xy_range: 3.0       # [m]
+    # Recovery is paced tighter than first-time init: it needs two consistent
+    # scans, so this interval sets the recovery latency directly.
+    lio.maploc.lost_attempt_min_dist: 0.2      # [m]
+    lio.maploc.lost_attempt_min_interval: 0.3  # [s]
+
+    # ---- output ----
+    lio.maploc.smooth_output: false      # smoothing is opt-in; /loc/odom carries the estimate
+    lio.maploc.publish_imu_rate: true
+    lio.maploc.publish_submap: true
+    lio.maploc.publish_when_invalid: false
+    lio.maploc.save_trajectory: "/tmp/claude-1001/-home-zhipengli-super-lio/f1a12421-dad4-45bd-9c98-8be78f7314b3/scratchpad/r2/loc_tum.txt"
+    lio.maploc.match_log: "/tmp/claude-1001/-home-zhipengli-super-lio/f1a12421-dad4-45bd-9c98-8be78f7314b3/scratchpad/r2/match.csv"
+    lio.maploc.publish_odom_raw: true
+    lio.maploc.odom_frame: "world"
+    lio.maploc.map_frame: "map"
+
+    # ---- logging ----
+    # The board is reached through a pasted log, so the defaults print what is
+    # needed to VERIFY a run and nothing that merely narrates a healthy one:
+    # startup banner, state changes, anomalies, a heartbeat, and an end-of-run
+    # summary (the block worth pasting back in full).
+    #
+    # debug: the per-event firehose -- one line per match and per submap
+    # rebuild. Turn it on for the first board runs or to chase a specific
+    # fault, off for everything else.
+    lio.maploc.debug: false
+    lio.maploc.log_heartbeat_s: 5.0        # periodic one-liner; 0 disables
+    lio.maploc.log_summary_on_exit: true
+    # A match crossing any of these prints with full context -- scan time,
+    # submap version and keyframe ids, predicted vs odometry position, gate
+    # outcome -- whether or not it was accepted. Rejections always print.
+    lio.maploc.log_warn_rmse: 0.15         # [m]   healthy is 0.09-0.10
+    lio.maploc.log_warn_inlier: 0.75       # healthy is > 0.95
+    lio.maploc.log_warn_corr_t: 0.10       # [m]   healthy is ~0.01
+    lio.maploc.log_warn_corr_r: 1.0        # [deg]
+    lio.maploc.log_warn_match_ms: 50.0     # x86 is ~3-5 ms; the board 3-6x that
+    lio.maploc.log_warn_submap_ms: 150.0   # x86 is ~1 ms cached, ~35 ms cold
+    lio.maploc.log_warn_every_n: 10        # rate limit for a repeating anomaly
+    # 期望雷达帧率，用于 summary 的 "frame delivery" 行。0 = 从到达间隔自动推断。
+    # 自动推断能抓不规则丢帧，但对"恰好每隔一帧丢一帧"是盲的；填上真实帧率可堵住。
+    lio.maploc.expected_frame_hz: 10.0

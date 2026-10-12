@@ -1,0 +1,17 @@
+# Written by loc_map_builder. Consumed by LI2Sup::loc::KeyframeMap.
+format_version: 1
+source_session: /home/zhipengli/localization/map_self/mid360_init
+source_frames: 23372
+kf_dist: 1.000000
+kf_angle: 15.000000
+kf_range: 60.000000
+kf_voxel: 0.250000
+global_voxel: 0.400000
+num_keyframes: 2811
+total_points: 23088583
+gravity: [0.013297, 0.010903, -9.747035]
+extrinsic_lidar_imu: [-0.011000, -0.023290, 0.044120, 1, 0, 0, 0, 1, 0, 0, 0, 1]
+bbox_min: [-58.144800, -162.728937, -6.086745]
+bbox_max: [198.899061, 70.868793, 0.599433]
+cloud_frame: IMU body frame of each keyframe
+intensity: absent (voxel-slam writes zeros; never use it)

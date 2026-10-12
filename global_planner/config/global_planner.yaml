@@ -1,0 +1,124 @@
+global_planner:
+  ros__parameters:
+    # 通行代价点云文件；必须包含 x、y、z、intensity 字段，数值方向由 intensity_semantics 指定。
+    map_path: /home/unitree/g1_nav_ros2_ws/src/global_planner/map/output_downsampled.pcd
+
+    # 地图和输出路径使用的 TF 坐标系。
+    map_frame: map
+
+    # 测试起点话题，消息类型为 geometry_msgs/msg/PoseWithCovarianceStamped；无里程计时可通过 RViz 设置起点。
+    start_topic: /initialpose
+
+    # 实机里程计话题，消息类型为 nav_msgs/msg/Odometry；收到后持续作为最新规划起点。
+    odom_topic: /loc/robo/odom
+
+    # 三维终点话题，消息类型为 geometry_msgs/msg/PoseStamped。
+    goal_topic: /goal_3d
+
+    # 全局路径输出话题，消息类型为 nav_msgs/msg/Path。
+    path_topic: /global_path
+
+    # 是否在启动时发布实际用于规划的稀疏可通行点云地图。
+    publish_map: false
+
+    # 地图输出话题，消息类型为 sensor_msgs/msg/PointCloud2；intensity 为 0～1 的通行度。
+    map_topic: /global_planner/map
+
+    # 是否在启动时发布未经体素化、筛选和膨胀处理的原始 PCD 点云。
+    publish_raw_map: true
+
+    # 原始地图输出话题；保留 PCD 中原始的 x、y、z、intensity。
+    raw_map_topic: /global_planner/raw_map
+
+    # XY 平面体素分辨率（米）；越小细节越多，但规划节点和内存占用越大。
+    resolution_xy: 0.20
+
+    # 高度方向体素分辨率（米），用于区分同一 XY 位置的不同地表层。
+    resolution_z: 0.10
+
+    # 同一 XY 栅格内可合并为同一地表层的最大高度差（米）。
+    layer_merge_height: 0.12
+
+    # 强度归一化模式：auto_minmax 自动使用当前点云最小/最大值；manual_minmax 使用下方手动范围；legacy_255 沿用旧版 0～255 阈值。
+    intensity_normalization_mode: auto_minmax
+
+    # 强度含义：traversability 表示数值越大越容易通行；cost 表示数值越小越容易通行。
+    intensity_semantics: traversability
+
+    # manual_minmax 模式下的原始强度下限；超出范围的数值会截断到归一化区间 0～1。
+    intensity_input_min: 0.0
+
+    # manual_minmax 模式下的原始强度上限；必须严格大于 intensity_input_min。
+    intensity_input_max: 255.0
+
+    # 归一化后的最低通行度，范围 0～1；越大过滤越严格，适用于 auto_minmax 和 manual_minmax。
+    normalized_traversability_threshold: 0.50
+
+    # 仅 legacy_255 模式使用的旧版原始阈值；保留当前配置以兼容已有地图和启动命令。
+    min_traversability: 50.0
+
+    # 一个体素被保留为可通行节点所需的最小可通行点比例，范围为 0～1。
+    min_traversable_fraction: 0.60
+
+    # 机器人机身水平安全半径（米）；可通行地表会绕低通行区域进行膨胀。
+    robot_radius: 0.0
+
+    # 障碍膨胀仅作用于高度差不超过该数值的点（米），防止不同楼层相互侵蚀。
+    inflation_vertical_tolerance: 0.08
+
+    # 一个体素被用于障碍膨胀所需的最小不可通行点比例，范围为 0～1。
+    min_inflation_obstacle_fraction: 0.50
+
+    # 起点或终点吸附到最近可通行地表时允许的最大水平距离（米）。
+    snap_radius: 1.0
+
+    # 起点或终点吸附到最近可通行地表时允许的最大高度差（米）。
+    snap_vertical_tolerance: 1.0
+
+    # 发布路径的统一高度偏移（米）；实际发布 z = 地表或目标 z + 此参数。
+    path_z_offset: 0.5
+
+    # A* 搜索当前 XY 栅格周围多少圈栅格作为候选邻居。
+    neighbor_cell_radius: 1
+
+    # 两个相邻规划节点允许的最大水平距离（米）。
+    max_neighbor_distance: 0.45
+
+    # 机器狗能够跨越的最大相邻高度差（米）。
+    max_step_height: 0.28
+
+    # 相邻地表连接允许的最大坡度（度），楼梯连接也受此限制。
+    max_slope_degrees: 55.0
+
+    # 低通行强度在边代价中的权重；越大越倾向选择高强度区域。
+    traversability_weight: 2.0
+
+    # 坡度代价权重；越大越倾向选择平缓地形。
+    slope_weight: 0.20
+
+    # 高度突变代价权重；越大越倾向减少上下台阶动作。
+    step_weight: 1.0
+
+    # Weighted A* 启发函数权重；1.0 为普通 A*，增大可提速但可能略微增加路径长度。
+    heuristic_weight: 1.15
+
+    # 单次搜索超时时间（秒）；小于等于 0 表示不限制。
+    planning_timeout: 3.0
+
+    # 是否在启动时计算地形连通分量；开启后不可达的起终点会立即返回。
+    enable_connectivity_precheck: true
+
+    # 是否启用经过安全性复核的路径捷径平滑，用于减少栅格锯齿。
+    enable_path_smoothing: true
+
+    # 平滑时沿候选直线路径检查地表的采样间距（米）。
+    smoothing_sample_step: 0.10
+
+    # 平滑采样点与最近安全地表节点之间允许的最大水平偏差（米）。
+    smoothing_xy_tolerance: 0.16
+
+    # 平滑采样点与实际地表之间允许的最大高度偏差（米）；较小值可防止跨台阶拉直。
+    smoothing_height_tolerance: 0.10
+
+    # 单次平滑捷径允许跨越的最大路径长度（米），用于限制校验开销。
+    smoothing_max_segment_length: 0.5
