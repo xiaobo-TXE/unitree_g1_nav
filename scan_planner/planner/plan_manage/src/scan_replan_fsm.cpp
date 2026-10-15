@@ -1037,7 +1037,7 @@ namespace scan_planner
     // direction (blended toward the goal yaw only within yaw_align_distance).
     YawTrajectoryInput input;
     input.duration = info.duration_;
-    input.initial_yaw = odom_yaw_;
+    input.initial_yaw = getOdomYaw();
     input.have_goal_yaw = have_goal_yaw_;
     input.goal_xy = end_pt_.head<2>();
     input.goal_yaw = goal_yaw_;
