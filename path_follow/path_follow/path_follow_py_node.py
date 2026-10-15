@@ -6,6 +6,7 @@ import time
 import json
 
 import rclpy
+from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy, qos_profile_sensor_data
 from std_srvs.srv import SetBool
@@ -469,12 +470,17 @@ def main(args=None):
     controller = PathFollower()
     try:
         rclpy.spin(controller)
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, ExternalShutdownException):
         pass
     finally:
-        controller.stop_robot()
+        try:
+            controller.stop_robot()
+        except RuntimeError:
+            # When the process is asked to stop (SIGINT/SIGTERM) the rclpy context
+            # is already invalid, so the zero velocity command cannot be sent.
+            pass
         controller.destroy_node()
-        rclpy.shutdown()
+        rclpy.try_shutdown()
 
 
 if __name__ == '__main__':

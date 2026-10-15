@@ -9,6 +9,7 @@ import rclpy
 from geometry_msgs.msg import Twist
 from nav_msgs.msg import Odometry, Path
 from path_follow.goal_utils import goal_identity, same_goal, valid_path
+from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy, qos_profile_sensor_data
 from std_srvs.srv import SetBool
@@ -241,11 +242,16 @@ def main(args=None):
     try:
         node = VelocitySelector()
         rclpy.spin(node)
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, ExternalShutdownException):
         pass
     finally:
         if node is not None:
-            node.command_pub.publish(Twist())
+            try:
+                node.command_pub.publish(Twist())
+            except RuntimeError:
+                # When the process is asked to stop (SIGINT/SIGTERM) the rclpy
+                # context is already invalid, so the command cannot be sent.
+                pass
             node.destroy_node()
         rclpy.try_shutdown()
 
