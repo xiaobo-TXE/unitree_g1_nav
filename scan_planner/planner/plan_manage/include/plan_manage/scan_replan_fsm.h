@@ -69,6 +69,12 @@ namespace scan_planner
     double reference_tf_max_age_{0.3}, reference_tf_grace_{0.5};
     double reference_tf_jump_translation_{0.2}, reference_tf_jump_yaw_{5.0 * 3.14159265358979323846 / 180.0};
 
+    /* yaw trajectory (heading as an explicit 7th DOF) */
+    bool yaw_trajectory_enable_{true};
+    double yaw_align_distance_{1.0}; // remaining distance to goal where the heading blends to goal yaw
+    double max_yaw_rate_{0.8};       // rad/s
+    double max_yaw_acc_{1.5};        // rad/s^2
+
     /* planning data */
     bool trigger_, have_target_, have_odom_, have_new_target_;
     bool preset_started_{false};
@@ -87,6 +93,8 @@ namespace scan_planner
 
     Eigen::Vector3d init_pt_, start_pt_, start_vel_, start_acc_, start_yaw_; // start state
     Eigen::Vector3d end_pt_, end_vel_;                                       // goal state
+    bool have_goal_yaw_{false};
+    double goal_yaw_{0.0};
     Eigen::Vector3d local_target_pt_, local_target_vel_;                     // local target state
     std::vector<Eigen::Vector3d> local_reference_path_world_;
     Eigen::Vector3d reference_end_pt_{Eigen::Vector3d::Zero()};
@@ -135,6 +143,7 @@ namespace scan_planner
     bool lookupReferenceTransform(Eigen::Isometry3d &reference_to_world);
     bool monitorReferenceTransform();
     void finishProcess();
+    void buildYawTrajectory(const LocalTrajData &info, scan_planner_msgs::msg::Bspline &bspline) const;
     void publishSelfInflationMarker();
     double getOdomYaw() const;
     double estimateYawFromSegment(const Eigen::Vector3d &from, const Eigen::Vector3d &to) const;

@@ -2,6 +2,7 @@
 #include <plan_manage/scan_replan_fsm.h>
 #include <plan_manage/reference_path_utils.h>
 #include <plan_manage/reference_frame_utils.h>
+#include <plan_manage/yaw_trajectory.h>
 #include <cmath>
 #include <limits>
 #include <stdexcept>
@@ -16,6 +17,20 @@ namespace
     if (!node->has_parameter(name)) node->declare_parameter<T>(name, default_value);
     return node->get_parameter(name).get_value<T>();
   }
+
+  // Yaw around Z from a quaternion; false when the quaternion is unusable.
+  bool quaternionToYaw(const geometry_msgs::msg::Quaternion &q, double &yaw)
+  {
+    const double norm2 = q.x * q.x + q.y * q.y + q.z * q.z + q.w * q.w;
+    if (!std::isfinite(norm2) || norm2 < 1e-6)
+      return false;
+    yaw = std::atan2(2.0 * (q.w * q.z + q.x * q.y), 1.0 - 2.0 * (q.y * q.y + q.z * q.z));
+    return std::isfinite(yaw);
+  }
+
+  // A local trajectory is treated as reaching the goal when its local target is
+  // within this distance of the global goal (then the terminal heading is pinned).
+  constexpr double kGoalReachTolerance = 0.1;
 } // namespace
 
 namespace scan_planner
@@ -60,6 +75,13 @@ namespace scan_planner
     if (reference_tf_max_age_ <= 0.0 || reference_tf_grace_ <= 0.0 ||
         reference_tf_jump_translation_ <= 0.0 || reference_tf_jump_yaw_ <= 0.0)
       throw std::runtime_error("reference TF limits must be positive");
+
+    yaw_trajectory_enable_ = load_parameter<bool>(node_, "fsm.yaw_trajectory_enable", true);
+    yaw_align_distance_ = load_parameter<double>(node_, "fsm.yaw_align_distance", 1.0);
+    max_yaw_rate_ = load_parameter<double>(node_, "fsm.max_yaw_rate", 0.8);
+    max_yaw_acc_ = load_parameter<double>(node_, "fsm.max_yaw_acc", 1.5);
+    if (yaw_align_distance_ <= 0.0 || max_yaw_rate_ <= 0.0 || max_yaw_acc_ <= 0.0)
+      throw std::runtime_error("yaw trajectory limits must be positive");
 
     if (navi_mode_ == NAVI_MODE::PRESET_TARGET)
     {
@@ -169,6 +191,16 @@ namespace scan_planner
 
     bool success = false;
     end_pt_ << msg->poses[0].pose.position.x, msg->poses[0].pose.position.y, rviz_goal_height_;
+    double rviz_goal_yaw = 0.0;
+    if (quaternionToYaw(msg->poses[0].pose.orientation, rviz_goal_yaw))
+    {
+      goal_yaw_ = rviz_goal_yaw;
+      have_goal_yaw_ = true;
+    }
+    else
+    {
+      have_goal_yaw_ = false;
+    }
     success = planner_manager_->planGlobalTraj(odom_pos_, odom_vel_, Eigen::Vector3d::Zero(), end_pt_, Eigen::Vector3d::Zero(), Eigen::Vector3d::Zero());
 
     if (success)
@@ -389,6 +421,16 @@ namespace scan_planner
     }
 
     reference_frame_id_ = msg->header.frame_id;
+    double reference_goal_yaw = 0.0;
+    if (quaternionToYaw(msg->poses.back().pose.orientation, reference_goal_yaw))
+    {
+      goal_yaw_ = reference_goal_yaw;
+      have_goal_yaw_ = true;
+    }
+    else
+    {
+      have_goal_yaw_ = false;
+    }
     have_last_reference_transform_ = false;
     reference_jump_replan_ = false;
     trigger_ = true;
@@ -981,6 +1023,39 @@ namespace scan_planner
     }
   }
 
+  void SCANReplanFSM::buildYawTrajectory(const LocalTrajData &info,
+                                         scan_planner_msgs::msg::Bspline &bspline) const
+  {
+    bspline.yaw_pts.clear();
+    bspline.yaw_dt = 0.0;
+
+    if (!yaw_trajectory_enable_)
+      return;
+
+    // The terminal heading is pinned only when this local trajectory actually
+    // reaches the global goal; otherwise the heading just follows the travel
+    // direction (blended toward the goal yaw only within yaw_align_distance).
+    YawTrajectoryInput input;
+    input.duration = info.duration_;
+    input.initial_yaw = odom_yaw_;
+    input.have_goal_yaw = have_goal_yaw_;
+    input.goal_xy = end_pt_.head<2>();
+    input.goal_yaw = goal_yaw_;
+    input.pin_terminal =
+        have_goal_yaw_ && (local_target_pt_ - end_pt_).head<2>().norm() < kGoalReachTolerance;
+
+    YawTrajectoryParams params;
+    params.yaw_align_distance = yaw_align_distance_;
+    params.max_yaw_rate = max_yaw_rate_;
+    params.max_yaw_acc = max_yaw_acc_;
+
+    buildYawControlPoints(
+        input, params,
+        [&info](double t) -> Eigen::Vector2d { return info.position_traj_.evaluateDeBoorT(t).head<2>(); },
+        [&info](double t) -> Eigen::Vector2d { return info.velocity_traj_.evaluateDeBoorT(t).head<2>(); },
+        bspline.yaw_pts, bspline.yaw_dt);
+  }
+
   bool SCANReplanFSM::callReboundReplan(bool flag_use_poly_init, bool flag_randomPolyTraj)
   {
     const uint64_t attempt = ++plan_attempt_id_;
@@ -1051,6 +1126,8 @@ namespace scan_planner
       {
         bspline.knots.push_back(knots(i));
       }
+
+      buildYawTrajectory(*info, bspline);
 
       bspline_pub_->publish(bspline);
 
