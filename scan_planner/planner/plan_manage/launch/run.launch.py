@@ -260,7 +260,7 @@ def generate_launch_description():
             DeclareLaunchArgument("navi_mode", default_value="3"),
             DeclareLaunchArgument("sensor_type", default_value="lidar"),
             DeclareLaunchArgument("controller_mode", default_value="closed_loop"),
-            DeclareLaunchArgument("enable_terminal_handoff", default_value="true"),
+            DeclareLaunchArgument("enable_terminal_handoff", default_value="false"),
             DeclareLaunchArgument("keypoints_file", default_value=""),
             DeclareLaunchArgument("reference_path_file", default_value=""),
             DeclareLaunchArgument("use_gpu", default_value="false"),

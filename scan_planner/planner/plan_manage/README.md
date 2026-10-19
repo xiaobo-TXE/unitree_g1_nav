@@ -1,17 +1,36 @@
-# Terminal tracking handoff
+# Local planning and terminal tracking handoff
 
 For real-robot closed-loop reference-path navigation (`navi_mode:=3`),
-`run.launch.py` starts both trackers and `velocity_selector` by default:
+`run.launch.py` uses local planning for the entire route by default. The local
+controller publishes `/nav_cmd` directly; neither `path_follow` nor
+`velocity_selector` is started:
 
 ```bash
 source install/setup.bash
 ros2 launch scan_planner run.launch.py is_real_world:=true navi_mode:=3 \
+  controller_mode:=closed_loop
+```
+
+The local planner follows `/global_path` as a reference and performs terminal
+position and heading alignment itself, including the independent yaw trajectory
+controlled by `fsm.yaw_trajectory_enable`. The goal must be clear of inflated
+obstacles; otherwise the local planner truncates the target and stops short of
+the requested pose.
+
+## Opt-in terminal tracking handoff
+
+To hand the final segment to `path_follow`, pass
+`enable_terminal_handoff:=true`:
+
+```bash
+ros2 launch scan_planner run.launch.py is_real_world:=true navi_mode:=3 \
   controller_mode:=closed_loop enable_terminal_handoff:=true
 ```
 
-The local controller publishes `/nav_cmd/local`, and `path_follow` publishes
-`/nav_cmd/global`. Only `velocity_selector` publishes `/nav_cmd`. Do not start
-an additional standalone tracker that also publishes `/nav_cmd`.
+With handoff enabled, the local controller publishes `/nav_cmd/local`, and
+`path_follow` publishes `/nav_cmd/global`. Only `velocity_selector` publishes
+`/nav_cmd`. Do not start an additional standalone tracker that also publishes
+`/nav_cmd`.
 
 The selector measures the 2D straight-line distance from `/loc/robo/odom` to the
 last `/global_path` pose, both in `map`. At a distance of **2 m or less** it
@@ -34,7 +53,8 @@ Configure `switch_distance`, `cmd_timeout`, and `odom_timeout` under
 `goal_align_distance=0.12 m` and `goal_tolerance=0.2 m`. The local controller
 retains `max_vy=0.3 m/s`. Look for `[SELECTOR]` and `[PF_DIAG]` logs.
 
-To use the original local-only connection:
+Local-only operation is the default. To disable an existing handoff-enabled
+setup, omit the flag or pass `enable_terminal_handoff:=false` explicitly:
 
 ```bash
 ros2 launch scan_planner run.launch.py enable_terminal_handoff:=false

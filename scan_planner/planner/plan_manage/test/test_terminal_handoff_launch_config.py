@@ -5,6 +5,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from launch import LaunchContext
+from launch.actions import DeclareLaunchArgument
 import pytest
 
 PACKAGE = Path(__file__).resolve().parents[1]
@@ -16,7 +17,7 @@ spec.loader.exec_module(module)
 def nodes(monkeypatch, **overrides):
     values = dict(is_real_world='true', use_sim_time='false', sensor_type='lidar',
                   controller_mode='closed_loop', keypoints_file='', reference_path_file='',
-                  navi_mode='3', enable_terminal_handoff='true', init_x='', init_y='', init_z='')
+                  navi_mode='3', enable_terminal_handoff='false', init_x='', init_y='', init_z='')
     values.update(overrides)
     context = LaunchContext()
     context.launch_configurations.update(values)
@@ -25,8 +26,25 @@ def nodes(monkeypatch, **overrides):
     return [action for action in module._setup(context) if isinstance(action, SimpleNamespace)]
 
 
-def test_real_reference_mode_has_one_navigation_output(monkeypatch):
+def test_declared_default_uses_local_planner_only():
+    description = module.generate_launch_description()
+    argument = next(action for action in description.entities
+                    if isinstance(action, DeclareLaunchArgument)
+                    and action.name == 'enable_terminal_handoff')
+    context = LaunchContext()
+    assert argument.default_value[0].perform(context) == 'false'
+
+
+def test_default_real_reference_mode_uses_local_planner_only(monkeypatch):
     launched = nodes(monkeypatch)
+    by_name = {node.name: node for node in launched}
+    assert 'path_follower' not in by_name and 'velocity_selector' not in by_name
+    assert ('cmd_vel', '/nav_cmd') in by_name['closed_loop_controller'].remappings
+    assert len([node for node in launched if node.executable == 'closed_loop_controller']) == 1
+
+
+def test_terminal_handoff_opt_in_restores_selector(monkeypatch):
+    launched = nodes(monkeypatch, enable_terminal_handoff='true')
     by_name = {node.name: node for node in launched}
     assert ('cmd_vel', '/nav_cmd/local') in by_name['closed_loop_controller'].remappings
     follower = by_name['path_follower']
@@ -40,9 +58,10 @@ def test_real_reference_mode_has_one_navigation_output(monkeypatch):
 
 
 @pytest.mark.parametrize('overrides,controller,topic', [
-    ({'enable_terminal_handoff': 'false'}, 'closed_loop_controller', '/nav_cmd'),
     ({'navi_mode': '1'}, 'closed_loop_controller', '/nav_cmd'),
     ({'is_real_world': 'false'}, 'closed_loop_controller', '/quad_0/cmd_vel'),
+    ({'is_real_world': 'false', 'enable_terminal_handoff': 'true'},
+     'closed_loop_controller', '/quad_0/cmd_vel'),
     ({'controller_mode': 'open_loop'}, 'open_loop_controller', None),
 ])
 def test_other_modes_preserve_original_launch(monkeypatch, overrides, controller, topic):
