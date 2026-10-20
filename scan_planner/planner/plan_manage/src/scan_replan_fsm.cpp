@@ -1032,6 +1032,25 @@ namespace scan_planner
     if (!yaw_trajectory_enable_)
       return;
 
+    // Terminal-only: leave yaw_pts empty unless this trajectory reaches the goal
+    // region, so the controller keeps its original heading logic (0.8 s look-ahead
+    // direction plus freeze-and-rotate) for every non-terminal trajectory.
+    if (!have_goal_yaw_)
+      return;
+
+    double min_goal_distance = (end_pt_.head<2>() - odom_pos_.head<2>()).norm();
+    constexpr int kGoalDistanceSamples = 20;
+    for (int i = 0; i <= kGoalDistanceSamples; ++i)
+    {
+      const double sample_t = info.duration_ * static_cast<double>(i) /
+                              static_cast<double>(kGoalDistanceSamples);
+      const double distance =
+          (info.position_traj_.evaluateDeBoorT(sample_t).head<2>() - end_pt_.head<2>()).norm();
+      min_goal_distance = std::min(min_goal_distance, distance);
+    }
+    if (min_goal_distance > yaw_align_distance_)
+      return;
+
     // The terminal heading is pinned only when this local trajectory actually
     // reaches the global goal; otherwise the heading just follows the travel
     // direction (blended toward the goal yaw only within yaw_align_distance).
