@@ -13,6 +13,7 @@
 | `a2_measure_base_height.py` | 是 | 从 `/loc/robo/odom` + `/lio/cloud_world` 测基座离地高度 `h_b`（同一坐标系内差值），并推导 `d_up`/`d_down`/`path_z_offset` |
 | `a2_check_inflation.py` | 是 | 把 `/self_inflation` 的两个圆柱反解成 `d_xy`/`d_off`/`d_up`/`d_down`，和配置对账 |
 | `a2_check_path_height.py` | 是 | 检查 `/global_path` 的高度链，核对 `path_z_offset + body_height` 有没有重复抬升 |
+| `a2_check_tf_gaps.py` | 是 | 量 `map ↔ world` 这个 TF 的到达间隔与时间戳年龄；`scan_planner` 正是靠它判断参考坐标系是否新鲜，一旦判为过期就会急停（"走一段就停"） |
 | `a2_bridge_watchdog_test.py` | 是 | 按时间线发速度指令，验证桥接的 `cmd_vel_timeout` 兜底停车和 `command_duration` |
 | `a2_robot.json` | — | 实测尺寸/厂商极限/安全余量，供上面的脚本读取 |
 
