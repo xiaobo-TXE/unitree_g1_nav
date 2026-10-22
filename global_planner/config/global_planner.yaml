@@ -1,7 +1,7 @@
 global_planner:
   ros__parameters:
     # 通行代价点云文件；必须包含 x、y、z、intensity 字段，数值方向由 intensity_semantics 指定。
-    map_path: /home/unitree/g1_nav_ros2_ws/src/global_planner/map/output_downsampled.pcd
+    map_path: /home/unitree/nav_ws/src/global_planner/map/trav_map.pcd
 
     # 地图和输出路径使用的 TF 坐标系。
     map_frame: map

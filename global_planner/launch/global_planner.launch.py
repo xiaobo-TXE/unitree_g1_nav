@@ -13,7 +13,7 @@ def generate_launch_description():
 
     pcd_file_arg = DeclareLaunchArgument(
         'pcd_file',
-        default_value='/home/unitree/nav_ros2_ws/src/global_planner/map/trav_map.pcd',
+        default_value='/home/unitree/nav_ws/src/global_planner/map/trav_map.pcd',
         description='Traversability PCD containing x, y, z and intensity fields',
     )
     map_frame_arg = DeclareLaunchArgument(
