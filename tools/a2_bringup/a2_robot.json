@@ -1,0 +1,17 @@
+{
+  "model": "Unitree A2",
+  "comment": "Measured body dimensions and vendor limits. Fill base_height_m after running a2_measure_base_height.py; keep it null while unknown so the preflight reports what still needs measuring.",
+  "measured": {
+    "length_m": 0.86,
+    "width_m": 0.46,
+    "height_m": 0.65,
+    "base_height_m": null
+  },
+  "limits": {
+    "step_height_m": 0.30,
+    "max_slope_deg": 45.0
+  },
+  "margins": {
+    "up_margin_m": 0.05
+  }
+}
