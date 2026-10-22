@@ -61,7 +61,7 @@ global_planner:
     min_traversable_fraction: 0.60
 
     # 机器人机身水平安全半径（米）；可通行地表会绕低通行区域进行膨胀。
-    robot_radius: 0.0
+    robot_radius: 0.315
 
     # 障碍膨胀仅作用于高度差不超过该数值的点（米），防止不同楼层相互侵蚀。
     inflation_vertical_tolerance: 0.08
@@ -85,10 +85,10 @@ global_planner:
     max_neighbor_distance: 0.45
 
     # 机器狗能够跨越的最大相邻高度差（米）。
-    max_step_height: 0.28
+    max_step_height: 0.30
 
     # 相邻地表连接允许的最大坡度（度），楼梯连接也受此限制。
-    max_slope_degrees: 55.0
+    max_slope_degrees: 45.0
 
     # 低通行强度在边代价中的权重；越大越倾向选择高强度区域。
     traversability_weight: 2.0
