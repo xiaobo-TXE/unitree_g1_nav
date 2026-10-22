@@ -5,11 +5,13 @@ Stand the robot still on flat ground, make sure localization is up, then run:
 
     python3 tools/a2_bringup/a2_measure_base_height.py
 
-``/loc/robo/odom`` is a ``map -> base`` pose, so its z is the body height above
-the ground only when the map's own z datum happens to be the floor. The script
-therefore also measures the floor around the robot from the LiDAR cloud, in the
-same frame, and reports ``h_b`` as a difference inside one frame. The raw z is
-printed next to it so a tape measurement can confirm the result.
+``/loc/robo/odom`` is a pose in the odometry frame while the cloud arrives in
+its own frame, and the two differ by a rotation and a translation. A z taken
+from one frame and a floor measured in the other are therefore not a height
+difference at all, so the script transforms the robot pose into the cloud frame,
+measures the floor around it there, and reports ``h_b`` as the difference
+between the two inside that one frame. The raw odometry z is printed next to it
+so a tape measurement can confirm the result.
 
 The measured value is the base height ``h_b`` that feeds d_up, d_down,
 path_z_offset and body_height.
@@ -81,13 +83,14 @@ class BaseHeightMeasurer(Node):
         self.samples = []
         self.frames = set()
         self.odom_frame = None
+        self.base_zs = []
         self.floor_chunks = []
         self.floor_count = 0
         self.cloud_frames = set()
         self.cloud_count = 0
         self.tf_error = None
         self._floor_radius = floor_radius
-        self._latest_xy = None
+        self._latest_position = None
         self._tf_buffer = tf2_ros.Buffer()
         self._tf_listener = tf2_ros.TransformListener(self._tf_buffer, self)
         self.create_subscription(Odometry, odom_topic, self._on_odom, 50)
@@ -99,18 +102,22 @@ class BaseHeightMeasurer(Node):
         self.frames.add(message.child_frame_id)
         self.odom_frame = message.header.frame_id
         position = message.pose.pose.position
-        self._latest_xy = (position.x, position.y)
+        self._latest_position = (position.x, position.y, position.z)
         self.samples.append(
             (time.monotonic(), position.x, position.y, position.z))
 
-    def _robot_xy_in(self, frame):
-        """The latest robot xy expressed in ``frame``, or None when unknown."""
+    def _robot_pose_in(self, frame):
+        """The latest robot pose in ``frame``, or None when it cannot be done.
+
+        The whole pose is transformed, not just xy: the odometry frame and the
+        cloud frame differ by a rotation and a translation, so a z taken from
+        one and subtracted from the other is not a height difference at all.
+        """
         if not frame or frame == self.odom_frame:
-            return self._latest_xy
+            return self._latest_position
         point = PointStamped()
         point.header.frame_id = self.odom_frame
-        point.point.x = self._latest_xy[0]
-        point.point.y = self._latest_xy[1]
+        point.point.x, point.point.y, point.point.z = self._latest_position
         try:
             transform = self._tf_buffer.lookup_transform(
                 frame, self.odom_frame, rclpy.time.Time(),
@@ -119,23 +126,24 @@ class BaseHeightMeasurer(Node):
             self.tf_error = str(error)
             return None
         transformed = do_transform_point(point, transform)
-        return transformed.point.x, transformed.point.y
+        return (transformed.point.x, transformed.point.y, transformed.point.z)
 
     def _on_cloud(self, message):
-        if self._latest_xy is None or self.floor_count >= MAX_FLOOR_POINTS:
+        if self._latest_position is None or self.floor_count >= MAX_FLOOR_POINTS:
             return
         self.cloud_count += 1
         self.cloud_frames.add(message.header.frame_id)
-        xy = self._robot_xy_in(message.header.frame_id)
-        if xy is None:
+        pose = self._robot_pose_in(message.header.frame_id)
+        if pose is None:
             return
+        self.base_zs.append((time.monotonic(), pose[2]))
 
         points = point_cloud2.read_points(
             message, field_names=('x', 'y', 'z'), skip_nans=True)
         if points.size == 0:
             return
-        dx = points['x'] - xy[0]
-        dy = points['y'] - xy[1]
+        dx = points['x'] - pose[0]
+        dy = points['y'] - pose[1]
         ring = (dx * dx + dy * dy <= self._floor_radius ** 2) & np.isfinite(points['z'])
         selected = points['z'][ring].astype(float)
         self.floor_chunks.append(selected)
@@ -155,6 +163,21 @@ def collect(node, settle, duration):
         rclpy.spin_once(node, timeout_sec=0.05)
     window_start = start + settle
     return [sample for sample in node.samples if sample[0] >= window_start]
+
+
+def base_in_cloud_frame(node, samples):
+    """The robot z in the cloud frame, and how many samples it used.
+
+    /loc/robo/odom is a pose in the odometry frame while the cloud arrives in
+    its own frame; the floor ring is measured in the cloud frame, so the
+    subtraction has to happen there too. The window matches the odometry
+    samples, whose first timestamp is the start of the measurement window.
+    """
+    window_start = samples[0][0]
+    values = [z for stamp, z in node.base_zs if stamp >= window_start]
+    if not values:
+        return None, 0
+    return statistics.fmean(values), len(values)
 
 
 def report(node, samples, args, robot):
@@ -202,18 +225,24 @@ def report(node, samples, args, robot):
           f'z {number(min(zs))} .. {number(max(zs))})')
     print(f'xy drift  : {number(drift)} m')
 
+    cloud_frame = sorted(node.cloud_frames)[0] if node.cloud_frames else None
+    base_cloud, base_cloud_count = base_in_cloud_frame(node, samples)
     floor_zs = node.floor_zs()
-    if floor_zs.size < MIN_FLOOR_POINTS:
+    z_floor = None
+    if base_cloud is None or floor_zs.size < MIN_FLOOR_POINTS:
         notes.append(
-            f'WARN: only {floor_zs.size} floor points from '
-            f'{node.cloud_count} clouds (need {MIN_FLOOR_POINTS}); h_b is not '
-            'available - is the cloud publishing and is TF up?')
+            f'WARN: no h_b: {base_cloud_count} robot z samples and '
+            f'{floor_zs.size} floor points from {node.cloud_count} clouds '
+            f'(need {MIN_FLOOR_POINTS} points); is the cloud publishing and is '
+            'the TF up?')
         status = 1
         if node.tf_error:
             notes.append(f'  tf: {node.tf_error}')
-        z_floor = None
     else:
         z_floor = float(np.percentile(floor_zs, args.floor_percentile))
+        if abs(base_cloud - base) > 0.005:
+            print(f'base z    : {number(base_cloud)} m in "{cloud_frame}"'
+                  '   (h_b uses this one, not the odom z above)')
         print(f'floor z   : {number(z_floor)} m   '
               f'(p{args.floor_percentile:g} of {floor_zs.size} points within '
               f'{number(args.floor_radius)} m, {node.cloud_count} clouds)')
@@ -228,12 +257,13 @@ def report(node, samples, args, robot):
         print(UNUSABLE)
         return status, None
 
-    base_height = base - z_floor
-    print(f'base_h h_b: {number(base_height)} m   (= odom z - floor z)')
-    if abs(base - base_height) > 0.02:
-        print(f'  note: odom z and h_b differ by {number(abs(base - base_height))} m,'
-              ' so the map z datum is not the floor; h_b is the difference,'
-              ' not the raw z')
+    base_height = base_cloud - z_floor
+    print(f'base_h h_b: {number(base_height)} m'
+          f'   (= base z in "{cloud_frame}" - floor z)')
+    if abs(base_cloud - base_height) > 0.02:
+        print(f'  note: base z and h_b differ by '
+              f'{number(abs(base_cloud - base_height))} m, so the frame z datum'
+              ' is not the floor; h_b is the difference, not the raw z')
     if not PLAUSIBLE_MIN <= base_height <= PLAUSIBLE_MAX:
         print(f'WARN: h_b is outside the plausible band '
               f'[{number(PLAUSIBLE_MIN)}, {number(PLAUSIBLE_MAX)}] m; check the '

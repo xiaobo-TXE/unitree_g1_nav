@@ -71,11 +71,17 @@ def args(monkeypatch, **overrides):
 
 
 def node(frames=('base',), odom_frame='map', cloud_frames=('world',),
-         floor_zs=(), cloud_count=10, tf_error=None):
+         floor_zs=(), cloud_count=10, tf_error=None, base_z=0.35):
+    """A stub node.
+
+    ``base_z`` is the robot z already expressed in the cloud frame, which is
+    what the tool measures the floor against; it may differ from the odometry z
+    when the two frames do.
+    """
     stub = SimpleNamespace(
         frames=set(frames), odom_frame=odom_frame,
         cloud_frames=set(cloud_frames), cloud_count=cloud_count,
-        tf_error=tf_error,
+        tf_error=tf_error, base_zs=[(0.0, float(base_z))] * 200,
     )
     values = np.asarray(floor_zs, dtype=float)
     stub.floor_zs = lambda: values
@@ -112,14 +118,24 @@ def test_h_b_when_the_map_datum_is_the_floor(monkeypatch):
     assert 'obstacles_inflation_z_down : 0.05' in out
 
 
-def test_h_b_is_invariant_to_the_map_datum(monkeypatch):
-    """Both ends shifted by 1 m is the same physical height."""
+def test_h_b_uses_the_robot_z_in_the_cloud_frame(monkeypatch):
+    """The odometry frame and the cloud frame need not share a z datum."""
     status, base_height, out = report(
-        node(floor_zs=flat_floor(1.0)), odom_samples(1.35), args(monkeypatch),
-        robot())
+        node(floor_zs=flat_floor(0.0), base_z=0.30), odom_samples(0.35),
+        args(monkeypatch), robot())
+    assert status == 0
+    assert base_height == pytest.approx(0.30, abs=0.01)
+    assert 'h_b uses this one' in out
+
+
+def test_h_b_is_invariant_to_the_frame_datum(monkeypatch):
+    """Both the robot z and the floor shifted by 1 m is the same height."""
+    status, base_height, out = report(
+        node(floor_zs=flat_floor(1.0), base_z=1.35), odom_samples(1.35),
+        args(monkeypatch), robot())
     assert status == 0
     assert base_height == pytest.approx(0.35, abs=0.01)
-    assert 'the map z datum is not the floor' in out
+    assert 'is not the floor' in out
 
 
 def test_floor_percentile_ignores_overhead_returns(monkeypatch):
@@ -148,7 +164,7 @@ def test_write_stores_h_b(monkeypatch, tmp_path):
     ('robot moved', {}, 'moving', None),
     ('no floor points', {'floor_zs': np.zeros(10)}, 0.35, None),
     ('tape mismatch', {}, 0.35, 0.60),
-    ('implausible h_b', {}, 15.0, None),
+    ('implausible h_b', {'base_z': 15.0}, 15.0, None),
 ])
 def test_unusable_measurements_never_touch_the_file(
         monkeypatch, tmp_path, label, stub_kwargs, sample_z, tape):
@@ -202,14 +218,16 @@ def test_cloud_ring_keeps_the_floor(ros):
     node_ = mod.BaseHeightMeasurer('/loc/robo/odom', '/lio/cloud_world', 0.7)
     try:
         node_.odom_frame = 'world'
-        node_._latest_xy = (0.5, 0.0)
+        node_._latest_position = (0.5, 0.0, 0.0)
         node_._on_cloud(ring_cloud())
         zs = node_.floor_zs()
+        recorded = list(node_.base_zs)
     finally:
         node_.destroy_node()
     assert zs.size > 1500
     assert float(np.percentile(zs, 5.0)) == pytest.approx(0.0, abs=1e-6)
     assert (zs < 0.05).mean() > 0.9
+    assert [z for _, z in recorded] == [0.0]
 
 
 def test_cloud_is_ignored_before_odometry(ros):
@@ -226,7 +244,7 @@ def test_floor_collection_stops_at_the_cap(ros):
     node_ = mod.BaseHeightMeasurer('/loc/robo/odom', '/lio/cloud_world', 0.7)
     try:
         node_.odom_frame = 'world'
-        node_._latest_xy = (0.5, 0.0)
+        node_._latest_position = (0.5, 0.0, 0.0)
         node_._on_cloud(ring_cloud())
         collected = node_.floor_count
         node_.floor_count = mod.MAX_FLOOR_POINTS

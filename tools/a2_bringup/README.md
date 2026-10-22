@@ -51,11 +51,11 @@ A2 在平地上**站好不动**，定位模块在跑，然后：
 python3 tools/a2_bringup/a2_measure_base_height.py --duration 15
 ```
 
-脚本同时订阅 `/loc/robo/odom` 和 `/lio/cloud_world`。`odom` 是 `map → base`
-位姿，它的 `z` **只有在地图的 z 基准恰好是地面时**才等于机体离地高（map 定位
-模式下 `init_z_from_map: true`，初始 z 取自先验地图）。所以脚本用 TF 把机器人
-xy 换算到点云坐标系，取脚下 0.7 m 环带内地表 z 的低分位值，按**同一坐标系内的
-差值**给出 `h_b = odom z − floor z`。
+脚本同时订阅 `/loc/robo/odom` 和 `/lio/cloud_world`。`odom` 是里程计坐标系里的
+位姿、点云在它自己的坐标系里，两系之间既有平移也有旋转（实测约 4.8 cm + 1.4°），
+所以**不能把一边的 z 拿去减另一边的 z**。脚本用 TF 把机器人**完整位姿**换算到点云
+坐标系，在那里量脚下 0.7 m 环带内地表 z 的低分位值，再按同一坐标系内的差值给出
+`h_b`；原始 `odom z` 会一并打印出来供对照。
 
 - 通过标准：`child_frame_id` 是 `base`；`z std` < 0.01 m；`xy drift` < 0.05 m；
   地表点 ≥ 200；`h_b` 落在 [0.15, 0.80] m。
@@ -68,7 +68,7 @@ xy 换算到点云坐标系，取脚下 0.7 m 环带内地表 z 的低分位值�
   python3 tools/a2_bringup/a2_measure_base_height.py --duration 15 --tape-height 0.35
   ```
 
-  差 > 0.05 m 判 FAIL，说明要么地图 z 基准不是地面、要么 base 原点不在你以为的位置。
+  差 > 0.05 m 判 FAIL，说明 base 原点不在你以为的位置，或两坐标系的姿态差比预期大。
 - 脚本会直接打印推导值：
 
   | 参数 | 公式 |
@@ -201,9 +201,9 @@ colcon build --packages-select scan_planner global_planner
 ## 自测（不需要真机）
 
 测量脚本的判定逻辑有配套的离线测试，用合成数据驱动 `report()`、用现场构造的
-`PointCloud2` 驱动点云回调，覆盖正常值、地图基准不是地面、卷尺符/不符、
-地表点缺失、机器人在动、帧不对、数值超界，并逐一确认这些情况下 `--write`
-**不会**落盘（`a2_robot.json` 始终用临时副本）。
+`PointCloud2` 驱动点云回调，覆盖正常值、机器人 z 与地表 z 分处两个坐标系、
+卷尺符/不符、地表点缺失、机器人在动、帧不对、数值超界，并逐一确认这些情况下
+`--write` **不会**落盘（`a2_robot.json` 始终用临时副本）。
 
 体检脚本另有一组测试，专门钉住**严重度排序**：状态名是字符串，`'FAIL' < 'PASS' <
 'WARN'`，所以用 `max()` 去合并"两个偏差里更差的那个"会把 FAIL 悄悄降级——这正是
