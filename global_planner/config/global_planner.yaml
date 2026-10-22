@@ -76,7 +76,7 @@ global_planner:
     snap_vertical_tolerance: 1.0
 
     # 发布路径的统一高度偏移（米）；实际发布 z = 地表或目标 z + 此参数。
-    path_z_offset: 0.5
+    path_z_offset: 0.46
 
     # A* 搜索当前 XY 栅格周围多少圈栅格作为候选邻居。
     neighbor_cell_radius: 1

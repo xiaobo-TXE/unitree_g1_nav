@@ -170,7 +170,9 @@ python3 tools/a2_bringup/a2_bridge_watchdog_test.py --vx 0.2 --hold 3
 - 另测 `command_duration`：单发一次速度指令（`ros2 topic pub --once`），
   机器人应持续动作约 1 s 而非立刻停；若表现为一顿一顿，说明发布频率低于 2 Hz。
 
-## 已应用的改动（第一批）
+## 已应用的改动
+
+本体几何与通行硬约束（第一批）：
 
 | 文件 | 参数 | 值 |
 |---|---|---|
@@ -186,6 +188,18 @@ python3 tools/a2_bringup/a2_bridge_watchdog_test.py --vx 0.2 --hold 3
 等效包络 1.06 × 0.63 m，比机身本身大，但四个角都在碰撞模型之内。
 `robot_radius` 取同一个 `d_xy`，保证全局膨胀与局部圆柱一致。
 
+上机实测 $h_b = 0.464$ m（卷尺读数一致）后推出的高度链：
+
+| 文件 | 参数 | 值 | 公式 |
+|---|---|---|---|
+| `scan_planner/.../config/planner.yaml` | `grid_map.obstacles_inflation_z_up` | 0.24 | `(0.65 − h_b) + 0.05` |
+| 同上 | `grid_map.obstacles_inflation_z_down` | 0.16 | `h_b − 0.30` |
+| 同上 | `grid_map.body_height` | 0.0 | 抬升由 `path_z_offset` 单独承担 |
+| `global_planner/config/global_planner.yaml` | `path_z_offset` | 0.46 | `= h_b` |
+
+`a2_robot.json` 的 `measured.base_height_m` 已写入 `0.464`；`a2_preflight.py`
+现在 **5 项全 PASS**（含此前 SKIP 的竖直 clearance）。
+
 改的是 `src` 侧，YAML 是 symlink 因而即时生效；只有 C++ 改动才需要重新 build：
 
 ```bash
@@ -194,9 +208,10 @@ colcon build --packages-select scan_planner global_planner
 
 ## 待填（需要上机实测）
 
-`grid_map.body_height`、`obstacles_inflation_z_up/down`、`path_z_offset`、
-以及（后续）速度/加速度/yaw 上限。把 `--write` 后的 `a2_robot.json`
-和录的包留下来，就能一次把数值补全。
+速度 / 加速度 / yaw 上限：`controllers.yaml` 的 `max_vx/vy/vyaw`、`planner.yaml`
+的 `fsm.max_yaw_rate`/`fsm.max_yaw_acc` 与 `manager`/`optimization` 的
+`max_vel`/`max_acc`、以及 `closed_loop_controller.cpp` 的 `kMaxVYawLimit`。
+本轮不做，等真机走稳后再补测。
 
 ## 自测（不需要真机）
 

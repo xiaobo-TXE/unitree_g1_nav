@@ -30,8 +30,8 @@ scan_planner_node:
     grid_map.double_cylinder_radius: 0.315
     grid_map.double_cylinder_offset: 0.215
     grid_map.body_height: 0.0
-    grid_map.obstacles_inflation_z_up: 0.1
-    grid_map.obstacles_inflation_z_down: 0.1
+    grid_map.obstacles_inflation_z_up: 0.24
+    grid_map.obstacles_inflation_z_down: 0.16
     grid_map.frame_id: world
     grid_map.sliding_map_frame_id: sliding_map
     grid_map.ground_height: 0.0

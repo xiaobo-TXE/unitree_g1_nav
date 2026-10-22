@@ -148,9 +148,11 @@ def test_every_shipped_config_loads(name):
 
 
 def test_all_checks_run_on_the_shipped_configuration():
-    """With the base height still unmeasured, nothing may grade as FAIL."""
+    """The shipped configuration must not grade as FAIL against the shipped
+    measurement, which now carries a base height."""
     params = {name: shipped(name) for name in mod.CONFIG_FILES}
     value = measurement()
+    assert value['measured']['base_height_m'] is not None
     report = mod.Report()
     mod.check_footprint(params['planner'], value, report)
     mod.check_inflation_radius(params['planner'], params['global'], report)

@@ -2,7 +2,9 @@ reference_path_publisher:
   ros__parameters:
     frame_id: world
     publish_delay_sec: 0.5
-    # Ground/route heights. scan_planner adds grid_map.body_height (0.4 m).
+    # Ground/route heights. The lift to body height comes from global_planner's
+    # path_z_offset, so grid_map.body_height stays 0; raise these only if the
+    # robot cannot climb the route.
     waypoints:
       [-5.5, 5.5, 0.10,
        -5.5, 4.5, 0.30,
