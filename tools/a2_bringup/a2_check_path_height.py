@@ -157,6 +157,12 @@ def parse_args():
     parser.add_argument('--bspline', action='store_true',
                         help='force the bspline subscription (needs the workspace sourced)')
     parser.add_argument('--robot-json', type=Path, default=DEFAULT_ROBOT)
+    parser.add_argument('--planner-yaml', type=Path,
+                        default=REPO_ROOT / PLANNER_CONFIG,
+                        help='scan_planner parameters (default: %(default)s)')
+    parser.add_argument('--global-yaml', type=Path,
+                        default=REPO_ROOT / GLOBAL_CONFIG,
+                        help='global_planner parameters (default: %(default)s)')
     parser.add_argument('--timeout', type=float, default=30.0)
     return parser.parse_args()
 
@@ -165,8 +171,8 @@ def main():
     args = parse_args()
     with open(args.robot_json) as handle:
         robot = json.load(handle)
-    planner = load_parameters(REPO_ROOT / PLANNER_CONFIG)
-    global_params = load_parameters(REPO_ROOT / GLOBAL_CONFIG)
+    planner = load_parameters(args.planner_yaml)
+    global_params = load_parameters(args.global_yaml)
 
     bspline_type = optional_bspline_type()
     if bspline_type is None and args.bspline:

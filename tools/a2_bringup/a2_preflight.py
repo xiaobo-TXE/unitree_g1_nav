@@ -26,10 +26,16 @@ REPO_ROOT = HERE.parents[1]
 
 PASS, WARN, FAIL, SKIP, INFO = 'PASS', 'WARN', 'FAIL', 'SKIP', 'INFO'
 FAILING = (FAIL,)
+# The status names do not sort by severity: 'FAIL' < 'PASS' < 'WARN'. Grading a
+# check by two deviations must therefore rank them explicitly, otherwise the
+# milder of the two hides the worse one.
+SEVERITY = {PASS: 0, WARN: 1, FAIL: 2}
 
+# Default locations inside this repository. The real robot keeps scan_planner
+# and global_planner in two separate workspaces, so every file can be pointed at
+# explicitly with the matching --*-yaml option.
 CONFIG_FILES = {
     'planner': 'scan_planner/planner/plan_manage/config/planner.yaml',
-    'controllers': 'scan_planner/planner/plan_manage/config/controllers.yaml',
     'global': 'global_planner/config/global_planner.yaml',
     'reference': 'scan_planner/planner/plan_manage/config/reference_path.map.yaml',
 }
@@ -66,6 +72,11 @@ def worst(delta, tol, fail):
     if delta > tol:
         return WARN
     return PASS
+
+
+def strictest(*statuses):
+    """The most severe of several statuses, which do not sort themselves."""
+    return max(statuses, key=SEVERITY.__getitem__)
 
 
 class Report:
@@ -147,7 +158,7 @@ def check_footprint(planner, robot, report):
             'scan_planner/.../config/planner.yaml  '
             f'grid_map.double_cylinder_offset: {want_offset:.2f}'
         )
-    status = max(
+    status = strictest(
         worst(delta_radius, FOOTPRINT_TOL, FOOTPRINT_FAIL),
         worst(delta_offset, FOOTPRINT_TOL, FOOTPRINT_FAIL),
     )
@@ -199,7 +210,7 @@ def check_clearances(planner, robot, report):
     want_down = base - step
     delta_up = abs(configured_up - want_up)
     delta_down = abs(configured_down - want_down)
-    status = max(
+    status = strictest(
         worst(delta_up, CLEARANCE_TOL, CLEARANCE_FAIL),
         worst(delta_down, CLEARANCE_TOL, CLEARANCE_FAIL),
     )
@@ -319,7 +330,15 @@ def parse_args():
         description='Offline A2 body-parameter preflight checks.')
     parser.add_argument('--robot-json', type=Path, default=DEFAULT_ROBOT,
                         help='measured robot dimensions (default: %(default)s)')
-    parser.add_argument('--repo-root', type=Path, default=REPO_ROOT)
+    parser.add_argument('--planner-yaml', type=Path,
+                        default=REPO_ROOT / CONFIG_FILES['planner'],
+                        help='scan_planner parameters (default: %(default)s)')
+    parser.add_argument('--global-yaml', type=Path,
+                        default=REPO_ROOT / CONFIG_FILES['global'],
+                        help='global_planner parameters (default: %(default)s)')
+    parser.add_argument('--reference-yaml', type=Path,
+                        default=REPO_ROOT / CONFIG_FILES['reference'],
+                        help='reference path parameters (default: %(default)s)')
     return parser.parse_args()
 
 
@@ -328,10 +347,12 @@ def main():
     with open(args.robot_json) as handle:
         robot = yaml.safe_load(handle)
 
-    params = {
-        name: load_parameters(args.repo_root / relative)
-        for name, relative in CONFIG_FILES.items()
+    configs = {
+        'planner': args.planner_yaml,
+        'global': args.global_yaml,
+        'reference': args.reference_yaml,
     }
+    params = {name: load_parameters(path) for name, path in configs.items()}
 
     measured = robot['measured']
     header = [
@@ -339,7 +360,7 @@ def main():
         f"robot : {robot['model']}  length={number(measured['length_m'])}"
         f" width={number(measured['width_m'])} height={number(measured['height_m'])}"
         f" base_height={measured.get('base_height_m') or 'unknown'}",
-        f'repo  : {args.repo_root}',
+        *(f'{name:<9}: {path}' for name, path in configs.items()),
         '',
     ]
 
@@ -349,8 +370,7 @@ def main():
     check_clearances(params['planner'], robot, report)
     check_path_heights(
         params['planner'], params['global'], params['reference'], robot, report)
-    check_reference_comment(
-        args.repo_root / CONFIG_FILES['reference'], params['planner'], report)
+    check_reference_comment(args.reference_yaml, params['planner'], report)
     check_traversability_limits(params['global'], robot, report)
 
     print(report.render(header))

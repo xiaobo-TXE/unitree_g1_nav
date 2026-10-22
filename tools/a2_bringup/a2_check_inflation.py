@@ -147,6 +147,9 @@ def parse_args():
     parser.add_argument('--marker-topic', default='/self_inflation')
     parser.add_argument('--odom-topic', default='/loc/robo/odom')
     parser.add_argument('--robot-json', type=Path, default=DEFAULT_ROBOT)
+    parser.add_argument('--planner-yaml', type=Path,
+                        default=REPO_ROOT / PLANNER_CONFIG,
+                        help='scan_planner parameters (default: %(default)s)')
     parser.add_argument('--repeat', action='store_true',
                         help='keep printing instead of reporting once')
     parser.add_argument('--timeout', type=float, default=30.0,
@@ -158,7 +161,7 @@ def main():
     args = parse_args()
     with open(args.robot_json) as handle:
         robot = json.load(handle)
-    planner = load_parameters(REPO_ROOT / PLANNER_CONFIG)
+    planner = load_parameters(args.planner_yaml)
 
     rclpy.init()
     node = InflationChecker(args.marker_topic, args.odom_topic, args.repeat)

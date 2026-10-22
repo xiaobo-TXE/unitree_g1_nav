@@ -97,6 +97,23 @@ python3 tools/a2_bringup/a2_preflight.py
 python3 tools/a2_bringup/a2_check_inflation.py
 ```
 
+> 真机上 `scan_planner` 和 `global_planner` 分处两个工作空间（`~/scan_planner_test/`
+> 与 `~/nav_ws/`，各自还多一层 `src/`），所以脚本里的默认相对路径不成立，要显式
+> 指定（默认值仍指向本仓库）：
+>
+> ```bash
+> SP=~/scan_planner_test/src/scan_planner/planner/plan_manage/config
+> NW=~/nav_ws/src
+> python3 tools/a2_bringup/a2_preflight.py \
+>   --planner-yaml $SP/planner.yaml \
+>   --reference-yaml $SP/reference_path.map.yaml \
+>   --global-yaml $NW/global_planner/config/global_planner.yaml
+> python3 tools/a2_bringup/a2_check_inflation.py --planner-yaml $SP/planner.yaml
+> python3 tools/a2_bringup/a2_check_path_height.py \
+>   --planner-yaml $SP/planner.yaml \
+>   --global-yaml $NW/global_planner/config/global_planner.yaml
+> ```
+
 `a2_check_inflation.py` 会把 marker 里的几何反算成
 `d_xy = scale.x/2`、`d_off = |front-rear|/2`、
 `d_up = top - odom_z`、`d_down = odom_z - bottom`，并逐项跟 `planner.yaml`、
@@ -186,9 +203,13 @@ colcon build --packages-select scan_planner global_planner
 测量脚本的判定逻辑有配套的离线测试，用合成数据驱动 `report()`、用现场构造的
 `PointCloud2` 驱动点云回调，覆盖正常值、地图基准不是地面、卷尺符/不符、
 地表点缺失、机器人在动、帧不对、数值超界，并逐一确认这些情况下 `--write`
-**不会**落盘（`a2_robot.json` 始终用临时副本）：
+**不会**落盘（`a2_robot.json` 始终用临时副本）。
+
+体检脚本另有一组测试，专门钉住**严重度排序**：状态名是字符串，`'FAIL' < 'PASS' <
+'WARN'`，所以用 `max()` 去合并"两个偏差里更差的那个"会把 FAIL 悄悄降级——这正是
+`strictest()` 存在的原因。
 
 ```bash
 source /opt/ros/humble/setup.bash
-python3 -m pytest tools/a2_bringup/test_a2_measure_base_height.py
+python3 -m pytest tools/a2_bringup/
 ```
