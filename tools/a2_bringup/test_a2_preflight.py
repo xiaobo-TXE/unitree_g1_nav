@@ -7,16 +7,22 @@ deviations with max() silently downgrades a failure. These tests pin the
 severity order and the two checks that grade more than one deviation.
 
     python3 -m pytest tools/a2_bringup/test_a2_preflight.py
+
+The grader is normally exercised against the shipped configuration files. The
+real robot keeps scan_planner and global_planner in two separate workspaces, so
+a test that cannot find a file skips instead of failing; point A2_PLANNER_YAML,
+A2_GLOBAL_YAML or A2_REFERENCE_YAML at it to run those too.
 """
 
 from __future__ import annotations
 
 import importlib.util
 import json
+import os
+import sys
 from pathlib import Path
 
 import pytest
-import yaml
 
 HERE = Path(__file__).resolve().parent
 spec = importlib.util.spec_from_file_location(
@@ -25,10 +31,32 @@ mod = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(mod)
 
 
+def shipped_path(name):
+    """A shipped configuration path, or skip when it is not in this checkout.
+
+    Look where the tool looks by default, then one level down for the ``src/``
+    layout the robot uses. A2_<NAME>_YAML takes precedence, which is how the
+    robot can supply global_planner from its other workspace.
+    """
+    override = os.environ.get(f'A2_{name.upper()}_YAML')
+    if override:
+        return Path(override)
+    relative = mod.CONFIG_FILES[name]
+    for root in (mod.REPO_ROOT, mod.REPO_ROOT / 'src'):
+        path = root / relative
+        if path.is_file():
+            return path
+    pytest.skip(f'{relative} is not under {mod.REPO_ROOT} or its src/')
+
+
+def shipped(name):
+    """The same configuration, loaded."""
+    return mod.load_parameters(shipped_path(name))
+
+
 def planner(**overrides):
     """The shipped scan_planner configuration, with optional overrides."""
-    with open(mod.REPO_ROOT / mod.CONFIG_FILES['planner']) as handle:
-        params = yaml.safe_load(handle)['scan_planner_node']['ros__parameters']
+    params = dict(shipped('planner'))
     params.update(overrides)
     return params
 
@@ -106,25 +134,22 @@ def test_clearances_accept_the_derived_values():
     assert not report.failed()
 
 
-@pytest.mark.parametrize('name, expected', [
-    ('planner', mod.CONFIG_FILES['planner']),
-    ('global', mod.CONFIG_FILES['global']),
-    ('reference', mod.CONFIG_FILES['reference']),
-])
-def test_every_config_file_exists_and_is_readable(name, expected):
-    """The robot keeps these in separate workspaces, so all are overridable."""
-    assert expected == mod.CONFIG_FILES[name]
-    assert mod.load_parameters(mod.REPO_ROOT / expected)
+@pytest.mark.parametrize('name', ['planner', 'global', 'reference'])
+def test_every_config_has_its_own_option(monkeypatch, tmp_path, name):
+    """They need not share a workspace, so each one is addressable."""
+    target = tmp_path / f'{name}.yaml'
+    monkeypatch.setattr(sys, 'argv', ['preflight', f'--{name}-yaml', str(target)])
+    assert getattr(mod.parse_args(), f'{name}_yaml') == target
+
+
+@pytest.mark.parametrize('name', ['planner', 'global', 'reference'])
+def test_every_shipped_config_loads(name):
+    assert shipped(name)
 
 
 def test_all_checks_run_on_the_shipped_configuration():
     """With the base height still unmeasured, nothing may grade as FAIL."""
-    params = {
-        'planner': planner(),
-        'global': mod.load_parameters(mod.REPO_ROOT / mod.CONFIG_FILES['global']),
-        'reference': mod.load_parameters(
-            mod.REPO_ROOT / mod.CONFIG_FILES['reference']),
-    }
+    params = {name: shipped(name) for name in mod.CONFIG_FILES}
     value = measurement()
     report = mod.Report()
     mod.check_footprint(params['planner'], value, report)
@@ -132,7 +157,6 @@ def test_all_checks_run_on_the_shipped_configuration():
     mod.check_clearances(params['planner'], value, report)
     mod.check_path_heights(
         params['planner'], params['global'], params['reference'], value, report)
-    mod.check_reference_comment(
-        mod.REPO_ROOT / mod.CONFIG_FILES['reference'], params['planner'], report)
+    mod.check_reference_comment(shipped_path('reference'), params['planner'], report)
     mod.check_traversability_limits(params['global'], value, report)
     assert [check['status'] for check in report.checks].count(mod.FAIL) == 0
